@@ -1,0 +1,23 @@
+{%extends 'base.html'%}{%set title='المبيعات'%}{%block content%}
+<div class="panel">
+{% if sales %}
+<form method="post" action="/sales/delete-all" onsubmit="return askDel(this,'كل الفواتير ({{sales|length}})',true)" style="margin-bottom:12px">
+<input type="hidden" name="restore" value="1">
+<button class="del">🗑 حذف كل الفواتير</button>
+</form>
+{% endif %}
+<div class="tablewrap"><table>
+<tr><th>الفاتورة</th><th>التاريخ</th><th>الإجمالي</th><th>المدفوع</th><th>الباقي</th><th>الدفع</th><th>إجراء</th></tr>
+{%for x in sales%}
+<tr><td>#{{x.id}}</td><td>{{x.sale_date}}</td><td>{{'%.3f'|format(x.total)}} ر.ع</td><td>{{'%.3f'|format(x.paid)}} ر.ع</td><td>{{'%.3f'|format(x.change_amount)}} ر.ع</td><td>{{ 'تحويل إلكتروني' if x.pay_method=='transfer' else 'كاش' }}</td>
+<td class="actions"><button type="button" class="mini" onclick="previewInvoice({{x.id}})">🧾 معاينة</button><form method="post" action="/sales/{{x.id}}/delete" onsubmit="return askDel(this,'#{{x.id}}',false)"><input type="hidden" name="restore" value="1"><button class="del">حذف</button></form></td></tr>
+{%else%}<tr><td colspan="7">لا توجد مبيعات</td></tr>{%endfor%}
+</table></div></div>
+{%endblock%}
+{%block scripts%}<script>
+function askDel(f,label,all){
+  if(!confirm((all?'سيتم حذف ':'سيتم حذف الفاتورة ')+label+' نهائياً ولا يمكن التراجع. هل أنت متأكد؟'))return false;
+  f.restore.value=confirm('هل تريد إرجاع الكميات المباعة إلى المخزون؟\n\nموافق = إرجاع الكميات\nإلغاء = حذف بدون إرجاع')?'1':'0';
+  return true;
+}
+</script>{%endblock%}

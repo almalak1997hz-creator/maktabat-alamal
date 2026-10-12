@@ -1,0 +1,51 @@
+<!-- الصق هذا الجزء في templates/products.html، في المكان الذي تريد أن يظهر فيه الصندوق -->
+<div class="card p-3 mb-3" id="aiBox">
+  <h5>إضافة بالذكاء الاصطناعي</h5>
+  <textarea id="aiText" class="form-control mb-2" rows="2"
+    placeholder="مثال: عندي آلة حاسبة 10 قطع بسعر 1 ريال"></textarea>
+  <button type="button" class="btn btn-primary" id="aiParse">حلّل الجملة</button>
+
+  <div id="aiPreview" class="mt-3" style="display:none">
+    <p>الاسم: <b id="pvName"></b> — الكمية: <b id="pvQty"></b> — السعر: <b id="pvPrice"></b></p>
+    <p id="pvExisting" class="text-warning" style="display:none"></p>
+    <button type="button" class="btn btn-success" id="aiAddNew">أضف كمنتج جديد</button>
+    <button type="button" class="btn btn-outline-success" id="aiAddStock" style="display:none">زِد مخزون المنتج الموجود</button>
+  </div>
+  <p id="aiMsg" class="mt-2"></p>
+</div>
+
+<script>
+(function () {
+  let current = null;
+  const $ = id => document.getElementById(id);
+  const post = (url, body) => fetch(url, {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)
+  }).then(async r => ({ok: r.ok, data: await r.json()}));
+
+  $("aiParse").onclick = async () => {
+    $("aiMsg").textContent = "جارٍ التحليل... (أول مرة قد تستغرق وقتاً)";
+    $("aiPreview").style.display = "none";
+    const {ok, data} = await post("/api/ai/parse-product", {text: $("aiText").value});
+    if (!ok) { $("aiMsg").textContent = data.error; return; }
+    current = data;
+    $("pvName").textContent = data.name;
+    $("pvQty").textContent = data.quantity;
+    $("pvPrice").textContent = data.price;
+    const ex = data.existing;
+    $("pvExisting").style.display = ex ? "" : "none";
+    $("aiAddStock").style.display = ex ? "" : "none";
+    if (ex) $("pvExisting").textContent = "يوجد منتج بنفس الاسم (مخزونه الحالي: " + ex.stock + ").";
+    $("aiMsg").textContent = "راجع البيانات ثم أكّد.";
+    $("aiPreview").style.display = "";
+  };
+
+  async function confirm(mode) {
+    const body = {...current, mode, existing_id: current.existing ? current.existing.id : null};
+    const {ok, data} = await post("/api/ai/add-product", body);
+    $("aiMsg").textContent = ok ? data.message : data.error;
+    if (ok) setTimeout(() => location.reload(), 800);
+  }
+  $("aiAddNew").onclick = () => confirm("new");
+  $("aiAddStock").onclick = () => confirm("add_stock");
+})();
+</script>

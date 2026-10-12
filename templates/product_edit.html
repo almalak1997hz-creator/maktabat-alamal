@@ -1,0 +1,24 @@
+{%extends 'base.html'%}{%set title='تعديل المنتج'%}{%block content%}
+{% set img = image_url(product.image) %}
+<div class="panel narrow"><h3>تعديل المنتج</h3>
+<form class="stack" method="post" enctype="multipart/form-data">
+<label>اسم المنتج<input name="name" value="{{product.name}}" required></label>
+<label>الباركود<input name="barcode" value="{{product.barcode or ''}}"></label>
+<label>السعر<input name="price" value="{{product.price}}" required></label>
+<label>الكمية<input name="stock" value="{{product.stock}}" required></label>
+<label>حد التنبيه<input name="min_stock" value="{{product.min_stock}}" required></label>
+<label>صورة المنتج
+{% if img %}<img src="{{img}}" alt="" style="display:block;width:120px;height:120px;object-fit:cover;border-radius:12px;border:1px solid #eadfd2;margin:8px 0">{% endif %}
+<img id="editPreview" alt="" style="display:none;width:120px;height:120px;object-fit:cover;border-radius:12px;border:1px solid #eadfd2;margin:8px 0">
+<input type="file" id="editImg" name="image" accept="image/*">
+</label>
+{% if img %}<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="remove_image" style="width:auto"> حذف الصورة الحالية</label>{% endif %}
+<button class="btn">حفظ التعديلات</button>
+</form></div>
+<script>
+(function(){
+  var i=document.getElementById('editImg'),p=document.getElementById('editPreview');
+  i.addEventListener('change',function(){var f=i.files&&i.files[0];if(f){p.src=URL.createObjectURL(f);p.style.display='block';}else{p.style.display='none';}});
+})();
+</script>
+{%endblock%}

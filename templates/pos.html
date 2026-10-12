@@ -1,0 +1,38 @@
+{%extends 'base.html'%}{%set title='الكاشير'%}{%block content%}<div class="pos"><div class="panel"><button type="button" class="pm" style="width:100%;margin-bottom:8px" onclick="scanCam()">📷 مسح باركود بالكاميرا</button><input id="q" class="search" placeholder="🔎 ابحث بالاسم أو الباركود" oninput="load()"><div id="grid" class="grid"></div></div><div class="panel cartpanel"><h3>🛒 السلة</h3><div id="cart"></div><h2>الإجمالي: <span id="total">0.000</span> ر.ع</h2><style>.pay{display:flex;gap:8px;margin:8px 0}.pm{flex:1;padding:11px;border:2px solid #e2d6c8;border-radius:12px;background:#fff;cursor:pointer;font:inherit}.pm.on{border-color:#2E7D5B;background:#2E7D5B;color:#fff}</style><div class="pay"><button type="button" class="pm on" data-m="cash" onclick="setM('cash')">💵 كاش</button><button type="button" class="pm" data-m="transfer" onclick="setM('transfer')">🏦 تحويل إلكتروني</button></div><div class="pay"><input id="discv" class="search" type="number" step=".001" min="0" placeholder="خصم ر.ع" oninput="disc=+this.value||0;draw()"><button type="button" class="pm" onclick="pct(5)">5%</button><button type="button" class="pm" onclick="pct(10)">10%</button></div><input id="paid" class="search" type="number" step=".001" placeholder="المبلغ المدفوع" oninput="calc()"><p id="change">الباقي: 0.000 ر.ع</p><button class="btn wide" onclick="sell()">إتمام البيع</button></div></div>{%endblock%}{%block scripts%}<script>
+let cart=[],items=[],method='cash',disc=0;
+function setM(m){method=m;document.querySelectorAll('.pm').forEach(b=>b.classList.toggle('on',b.dataset.m==m));paid.disabled=(m=='transfer');if(m=='transfer')paid.value='';calc()}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function thumb(x,size){
+  const st='width:'+size+'px;height:'+size+'px;border-radius:10px;flex:none;';
+  return x.image_url
+    ? `<img src="${esc(x.image_url)}" alt="" loading="lazy" style="${st}object-fit:cover;border:1px solid #eadfd2;display:block;margin:0 auto 6px">`
+    : `<span style="${st}background:#f1e9df;color:#b9a48e;display:flex;align-items:center;justify-content:center;margin:0 auto 6px">📷</span>`;
+}
+async function load(){
+  items=await fetch('/api/products?q='+encodeURIComponent(q.value)).then(r=>r.json());
+  grid.innerHTML=items.map((x,i)=>`<button class="product ${x.stock<1?'out':''}" ${x.stock<1?'disabled':''} onclick="add(items[${i}])">${thumb(x,64)}<b>${esc(x.name)}</b><span>${Number(x.price).toFixed(3)} ر.ع</span><small>المخزون: ${x.stock}</small></button>`).join('');
+}
+function add(x){let y=cart.find(z=>z.id==x.id);if(y){if(y.quantity>=x.stock)return alert('الكمية أكبر من المخزون');y.quantity++}else cart.push({...x,quantity:1});draw()}
+function draw(){
+  cartbox=document.getElementById('cart');
+  cartbox.innerHTML=cart.map(x=>`<div class="row"><span style="display:flex;align-items:center;gap:8px">${x.image_url?`<img src="${esc(x.image_url)}" alt="" style="width:32px;height:32px;border-radius:6px;object-fit:cover">`:''}${esc(x.name)}</span><span><button onclick="chg(${x.id},-1)">−</button> ${x.quantity} <button onclick="chg(${x.id},1)">+</button></span><b>${(x.price*x.quantity).toFixed(3)}</b></div>`).join('')||'<div class="empty">السلة فارغة</div>';
+  total.textContent=net().toFixed(3);calc()
+}
+function chg(id,d){let x=cart.find(z=>z.id==id);if(!x)return;x.quantity+=d;if(x.quantity<1)cart=cart.filter(z=>z.id!=id);draw()}
+function net(){return Math.max(0,cart.reduce((a,x)=>a+x.price*x.quantity,0)-disc)}
+function pct(p){disc=+(cart.reduce((a,x)=>a+x.price*x.quantity,0)*p/100).toFixed(3);discv.value=disc;draw()}
+function calc(){if(method=='transfer'){change.textContent='الدفع: تحويل إلكتروني';return}let t=net(),p=+paid.value||0;change.textContent=(p>=t?'الباقي: ':'المتبقي: ')+Math.abs(p-t).toFixed(3)+' ر.ع'}
+async function sell(){if(!cart.length)return alert('السلة فارغة');let r=await fetch('/api/sale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:cart.map(x=>({id:x.id,quantity:x.quantity})),paid:+paid.value||0,method:method,discount:disc})});let d=await r.json();if(!d.ok)return alert(d.message);cart=[];paid.value='';disc=0;discv.value='';setM('cash');draw();load();previewInvoice(d.sale_id)}
+function loadJs(u){return new Promise(function(ok,no){var e=document.createElement('script');e.src=u;e.onload=ok;e.onerror=no;document.head.appendChild(e)})}
+async function scanCam(){
+ if(!window.isSecureContext)return alert('الكاميرا تعمل فقط عبر رابط https، افتح الموقع من رابط المشاركة (trycloudflare).');
+ if(!window.Html5Qrcode){try{await loadJs('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js')}catch(e){try{await loadJs('https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js')}catch(e2){return alert('تعذّر تحميل مكتبة المسح، تأكد من اتصال الإنترنت.')}}}
+ var box=document.createElement('div');box.style.cssText='position:fixed;inset:0;background:#000d;z-index:2147483004;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;gap:10px';
+ box.innerHTML='<div id="reader" style="width:min(420px,100%);background:#000;border-radius:16px;overflow:hidden"></div><p style="color:#fff;margin:0">وجّه الكاميرا نحو الباركود</p><button type="button" class="pm" id="scx" style="max-width:220px;flex:none">✖ إغلاق</button>';
+ document.body.appendChild(box);
+ var F=Html5QrcodeSupportedFormats,h=new Html5Qrcode('reader',{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.QR_CODE],experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
+ var stop=async function(){try{await h.stop()}catch(e){}box.remove()};document.getElementById('scx').onclick=stop;var busy=false;
+ try{await h.start({facingMode:'environment'},{fps:10,qrbox:{width:280,height:150}},async function(txt){if(busy)return;busy=true;await stop();q.value=txt;await load();if(items.length==1)add(items[0]);else if(!items.length)alert('لا يوجد منتج بهذا الباركود: '+txt)},function(){})}
+ catch(e){box.remove();alert('تعذّر تشغيل الكاميرا. اسمح لها من إعدادات Safari ثم أعد المحاولة.')}}
+load();
+</script>{%endblock%}

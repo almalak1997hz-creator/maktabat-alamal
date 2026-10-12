@@ -1,0 +1,38 @@
+{%extends 'base.html'%}{%set title='المنتجات'%}{%block content%}
+<div class="panel"><h3>إضافة منتج</h3>
+<form class="form" method="post" enctype="multipart/form-data">
+<input name="name" placeholder="اسم المنتج" required>
+<input name="barcode" placeholder="الباركود">
+<input name="price" placeholder="السعر" required>
+<input name="stock" placeholder="الكمية" required>
+<input name="min_stock" value="5" placeholder="حد التنبيه">
+<label style="display:flex;align-items:center;gap:10px;cursor:pointer;border:1px solid #e2d6c8;border-radius:14px;padding:8px 14px;background:#fff;color:#7b5a3c">
+<img id="imgPreview" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:8px;display:none">
+<span id="imgLabel">📷 اختيار صورة</span>
+<input type="file" id="imgInput" name="image" accept="image/*" style="display:none">
+</label>
+<button class="btn">إضافة</button>
+</form></div>
+<div class="panel"><div class="tablewrap"><table>
+<tr><th>الصورة</th><th>المنتج</th><th>الباركود</th><th>السعر</th><th>المخزون</th><th>الحد</th><th>إجراء</th></tr>
+{%for p in products%}{% set img = image_url(p.image) %}
+<tr>
+<td>{% if img %}<img src="{{img}}" alt="{{p.name}}" loading="lazy" style="width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid #eadfd2">{% else %}<span style="display:inline-block;width:56px;height:56px;border-radius:10px;background:#f1e9df;text-align:center;line-height:56px;color:#b9a48e">📷</span>{% endif %}</td>
+<td>{{p.name}}</td><td>{{p.barcode or ''}}</td><td>{{'%.3f'|format(p.price)}} ر.ع</td><td>{{p.stock}}</td><td>{{p.min_stock}}</td>
+<td class="actions"><a class="mini" href="/products/{{p.id}}/edit">تعديل</a><form method="post" action="/products/{{p.id}}/delete" onsubmit="return confirm('حذف المنتج؟')"><button class="del">حذف</button></form></td>
+</tr>
+{%else%}<tr><td colspan="7">لا توجد منتجات</td></tr>{%endfor%}
+</table></div></div>
+<script>
+(function(){
+  var inp=document.getElementById('imgInput'),pre=document.getElementById('imgPreview'),lab=document.getElementById('imgLabel');
+  if(!inp)return;
+  inp.addEventListener('change',function(){
+    var f=inp.files&&inp.files[0];
+    if(!f){pre.style.display='none';lab.textContent='📷 اختيار صورة';return;}
+    pre.src=URL.createObjectURL(f);pre.style.display='block';
+    lab.textContent=f.name.length>16?f.name.slice(0,14)+'…':f.name;
+  });
+})();
+</script>
+{%endblock%}

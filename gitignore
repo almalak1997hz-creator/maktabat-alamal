@@ -1,0 +1,20 @@
+# بيانات المحل: لا تُرفع ولا تُزامَن أبداً
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+backups/
+invoices/
+product_images/
+barcodes/
+.secret_key
+رابط_مكتبة_الأمل.txt
+
+# ملفات كبيرة أو خاصة بكل جهاز
+cloudflared.exe
+__pycache__/
+*.pyc
+*.zip
+*.torrent
+WhatsApp Image*
+maktabat_alamal_backup_*
