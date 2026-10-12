@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import request, session, jsonify, redirect, abort, flash, get_flashed_messages
 from werkzeug.security import generate_password_hash
 
-PERMS = {"pos": "نقطة البيع", "stock": "المنتجات والجرد", "sales": "الفواتير", "reports": "التقارير والأرباح"}
+PERMS = {"pos": "نقطة البيع", "stock": "المنتجات والجرد", "sales": "الفواتير", "reports": "التقارير والأرباح", "costs": "أسعار الشراء والتكلفة"}
 DEFAULTS = {"shop": "", "vatin": "", "phone": "", "addr": "", "vat": "5", "logo": "1", "show_vat": "1",
             "barcode": "1", "qr": "1", "footer": "شكراً لزيارتكم", "paper": "80", "autoprint": "1"}
 GUARD = (("/products", "stock"), ("/count", "stock"), ("/inventory", "stock"), ("/reports", "reports"),
@@ -16,6 +16,11 @@ GUARD = (("/products", "stock"), ("/count", "stock"), ("/inventory", "stock"), (
 
 
 _SAVE = {}
+
+
+def has_perm(k):
+    f = _SAVE.get("perm")
+    return bool(f and f(k))
 
 
 def save_invoice(sid):
@@ -52,7 +57,7 @@ def register(app, db, login_required, base_dir, app_name, currency):
                 ps = my_perms()
                 if "all" not in ps and perm not in ps:
                     return ("ليست لديك صلاحية لهذه الصفحة.", 403)
-        if p.startswith("/pro/") and p != "/pro/share" and not is_admin(): abort(403)
+        if p.startswith(("/pro/settings", "/pro/log", "/pro/close")) and not is_admin(): abort(403)
 
     # ---------------- الفاتورة ----------------
     def render_invoice(sid, args, logo_src="/static/logo.png", auto=True):
@@ -119,6 +124,7 @@ document.querySelectorAll('[data-k]').forEach(function(x){{x.onchange=function()
         with open(os.path.join(d, f"invoice_{sid}.html"), "w", encoding="utf-8") as fh:
             fh.write(render_invoice(sid, {}, "../static/logo.png", False))
     _SAVE["f"] = _save
+    _SAVE["perm"] = lambda k: ("all" in my_perms()) or (k in my_perms())
 
     # ---------------- الإعدادات والمستخدمون ----------------
     @app.route("/pro/settings", methods=["GET", "POST"])

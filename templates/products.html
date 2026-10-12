@@ -3,7 +3,8 @@
 <form class="form" method="post" enctype="multipart/form-data">
 <input name="name" placeholder="اسم المنتج" required>
 <input name="barcode" placeholder="الباركود">
-<input name="price" placeholder="السعر" required>
+<input name="price" placeholder="سعر البيع" required>
+{% if pro_can('costs') %}<input name="cost" placeholder="سعر الشراء (التكلفة)">{% endif %}
 <input name="stock" placeholder="الكمية" required>
 <input name="min_stock" value="5" placeholder="حد التنبيه">
 <label style="display:flex;align-items:center;gap:10px;cursor:pointer;border:1px solid #e2d6c8;border-radius:14px;padding:8px 14px;background:#fff;color:#7b5a3c">

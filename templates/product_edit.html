@@ -4,7 +4,8 @@
 <form class="stack" method="post" enctype="multipart/form-data">
 <label>اسم المنتج<input name="name" value="{{product.name}}" required></label>
 <label>الباركود<input name="barcode" value="{{product.barcode or ''}}"></label>
-<label>السعر<input name="price" value="{{product.price}}" required></label>
+<label>سعر البيع<input name="price" value="{{product.price}}" required></label>
+{% if pro_can('costs') %}<label>سعر الشراء (التكلفة)<input name="cost" value="{{product.cost or 0}}"></label>{% endif %}
 <label>الكمية<input name="stock" value="{{product.stock}}" required></label>
 <label>حد التنبيه<input name="min_stock" value="{{product.min_stock}}" required></label>
 <label>صورة المنتج

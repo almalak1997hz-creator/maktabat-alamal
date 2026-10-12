@@ -85,6 +85,8 @@ def init_db():
     ensure_column(c, "users", "created_at", "TEXT")
     ensure_column(c, "sales", "pay_method", "TEXT DEFAULT 'cash'")
     ensure_column(c, "sales", "discount", "REAL DEFAULT 0")
+    ensure_column(c, "sales", "user", "TEXT")
+    ensure_column(c, "sale_items", "cost", "REAL")
     ensure_column(c, "products", "cost", "REAL DEFAULT 0")
     if not c.execute("SELECT id FROM users LIMIT 1").fetchone():
         c.execute(
@@ -230,13 +232,13 @@ def api_sale():
         if paid < total: raise ValueError("المبلغ المدفوع أقل من الإجمالي.")
         change = max(0.0, paid - total)
         cur = c.execute(
-            "INSERT INTO sales(sale_date,total,paid,change_amount,pay_method,discount) VALUES(?,?,?,?,?,?)",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), total, paid, change, method, discount),
+            "INSERT INTO sales(sale_date,total,paid,change_amount,pay_method,discount,user) VALUES(?,?,?,?,?,?,?)",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), total, paid, change, method, discount, session.get("username")),
         )
         sid = cur.lastrowid
         for p, q, sub in checked:
-            c.execute("INSERT INTO sale_items(sale_id,product_id,product_name,quantity,price,subtotal) VALUES(?,?,?,?,?,?)",
-                      (sid, p["id"], p["name"], q, p["price"], sub))
+            c.execute("INSERT INTO sale_items(sale_id,product_id,product_name,quantity,price,subtotal,cost) VALUES(?,?,?,?,?,?,?)",
+                      (sid, p["id"], p["name"], q, p["price"], sub, (p["cost"] if "cost" in p.keys() else None) or None))
             c.execute("UPDATE products SET stock=stock-? WHERE id=?", (q, p["id"]))
         c.commit()
         try:
@@ -262,7 +264,8 @@ def products():
             if not n: raise ValueError("أدخل اسم المنتج.")
             if price < 0 or stock < 0 or mn < 0: raise ValueError("القيم لا يمكن أن تكون سالبة.")
             img = save_product_image(request.files.get("image")) or ""
-            c.execute("INSERT INTO products(name,barcode,price,stock,min_stock,image) VALUES(?,?,?,?,?,?)", (n,b,price,stock,mn,img))
+            cur = c.execute("INSERT INTO products(name,barcode,price,stock,min_stock,image) VALUES(?,?,?,?,?,?)", (n,b,price,stock,mn,img))
+            if request.form.get("cost") and _can_cost(): c.execute("UPDATE products SET cost=? WHERE id=?", (max(0.0, float(request.form["cost"].replace(",", "."))), cur.lastrowid))
             c.commit(); flash("تمت إضافة المنتج.", "success")
         except Exception as e: c.rollback(); flash(str(e), "danger")
         finally: c.close()
@@ -284,7 +287,9 @@ def edit_product(pid):
             new_img = save_product_image(request.files.get("image"))
             if new_img: img = new_img
             elif request.form.get("remove_image"): img = ""
-            c.execute("UPDATE products SET name=?,barcode=?,price=?,stock=?,min_stock=?,image=? WHERE id=?", (n,b,price,stock,mn,img,pid)); c.commit(); flash("تم حفظ التعديلات.", "success")
+            c.execute("UPDATE products SET name=?,barcode=?,price=?,stock=?,min_stock=?,image=? WHERE id=?", (n,b,price,stock,mn,img,pid))
+            if request.form.get("cost") is not None and _can_cost(): c.execute("UPDATE products SET cost=? WHERE id=?", (max(0.0, float((request.form["cost"] or "0").replace(",", "."))), pid))
+            c.commit(); flash("تم حفظ التعديلات.", "success")
             return redirect(url_for("products"))
         except Exception as e: c.rollback(); flash(str(e), "danger")
     c.close(); return render_template("product_edit.html", product=p)
@@ -431,6 +436,12 @@ ai_web.register(app, db, CURRENCY)
 import ai_products
 ai_products.register(app, db, login_required)
 import pro_features
+
+
+def _can_cost():
+    return pro_features.has_perm("costs")
+
+
 pro_features.register(app, db, login_required, BASE_DIR, APP_NAME, CURRENCY)
 
 

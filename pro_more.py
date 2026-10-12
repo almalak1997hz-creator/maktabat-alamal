@@ -34,7 +34,7 @@ CHEER = [
     "التنظيم نصف النجاح، ومتجرك منظم بإذنه تعالى ✅",
 ]
 LABELS = (("/api/sale", "بيع فاتورة"), ("/delete", "حذف"), ("/edit", "تعديل منتج"), ("/count", "تحديث جرد"), ("/returns", "مرتجع"),
-          ("/pro/settings", "إعدادات/مستخدمون"), ("/pro/costs", "تحديث التكلفة"), ("/pro/close", "إغلاق صندوق"),
+          ("/pro/settings", "إعدادات/مستخدمون"), ("/pro/costs", "تحديث أسعار الشراء"), ("/pro/purchase", "تسجيل شراء"), ("/pro/close", "إغلاق صندوق"),
           ("/products", "إضافة منتج"), ("/settings", "إعدادات"), ("/backup", "نسخ احتياطي"))
 
 
@@ -44,8 +44,9 @@ def register(app, db, login_required, base_dir, currency, my_perms):
         if n not in {r[1] for r in c.execute(f"PRAGMA table_info({t})")}: c.execute(f"ALTER TABLE {t} ADD COLUMN {n} {d}")
     for q in (              "CREATE TABLE IF NOT EXISTS returns(id INTEGER PRIMARY KEY AUTOINCREMENT,sale_id INT,product_id INT,qty INT,amount REAL,ts TEXT,user TEXT)",
               "CREATE TABLE IF NOT EXISTS closings(id INTEGER PRIMARY KEY AUTOINCREMENT,day TEXT,cash REAL,transfer REAL,counted REAL,diff REAL,user TEXT,ts TEXT)",
+              "CREATE TABLE IF NOT EXISTS purchases(id INTEGER PRIMARY KEY AUTOINCREMENT,ts TEXT,product_id INT,name TEXT,qty INT,unit_cost REAL,supplier TEXT,user TEXT)",
               "CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY AUTOINCREMENT,ts TEXT,user TEXT,action TEXT)"): c.execute(q)
-    col("sales", "discount", "REAL DEFAULT 0"); col("products", "cost", "REAL DEFAULT 0")
+    col("sales", "discount", "REAL DEFAULT 0"); col("sales", "user", "TEXT"); col("products", "cost", "REAL DEFAULT 0"); col("sale_items", "cost", "REAL")
     c.commit(); c.close()
 
     can = lambda k: bool({"all", k} & my_perms())
@@ -79,7 +80,7 @@ def register(app, db, login_required, base_dir, currency, my_perms):
         out["low"] = [dict(name=r["name"], stock=r["stock"]) for r in rows("SELECT name,stock FROM products WHERE stock<=min_stock ORDER BY stock LIMIT 8")]
         out["top"] = [dict(name=r["product_name"], qty=r["q"]) for r in rows("SELECT product_name,SUM(quantity) q FROM sale_items GROUP BY product_id ORDER BY q DESC LIMIT 5")]
         if can("reports"):
-            prof = lambda w: one("SELECT SUM(si.subtotal-si.quantity*COALESCE(p.cost,0)) FROM sale_items si JOIN sales s ON s.id=si.sale_id LEFT JOIN products p ON p.id=si.product_id WHERE " + w) \
+            prof = lambda w: one("SELECT SUM(si.subtotal-si.quantity*COALESCE(si.cost,p.cost,0)) FROM sale_items si JOIN sales s ON s.id=si.sale_id LEFT JOIN products p ON p.id=si.product_id WHERE " + w) \
                 - one("SELECT SUM(discount) FROM sales WHERE " + w.replace("s.sale_date", "sale_date"))
             out["profit"] = {"week": round(prof("strftime('%Y-%W',s.sale_date)=strftime('%Y-%W','now','localtime')"), 3),
                              "month": round(prof("strftime('%Y-%m',s.sale_date)=strftime('%Y-%m','now','localtime')"), 3)}
@@ -136,18 +137,51 @@ def register(app, db, login_required, base_dir, currency, my_perms):
                     f'<div class="panel"><form class="form" method=post><input name=counted type=number step=.001 placeholder="الكاش الفعلي الموجود الآن" required><button class="btn">إغلاق اليوم</button></form></div>'
                     f'<div class="panel"><h3>آخر الإغلاقات</h3><div class="tablewrap"><table><tr><th>اليوم</th><th>المتوقع</th><th>تحويل</th><th>الفعلي</th><th>الفرق</th><th>بواسطة</th></tr>{hist}</table></div></div>')
 
-    # ---------- التكلفة (لحساب الربح) ----------
+    # ---------- أسعار الشراء والبيع (لحساب الربح بدقة) ----------
     @app.route("/pro/costs", methods=["GET", "POST"])
     @login_required
     def costs():
-        if "all" not in my_perms(): abort(403)
+        need("costs")
         if request.method == "POST":
             k = db()
             for kk, v in request.form.items():
-                if kk.startswith("c") and kk[1:].isdigit(): k.execute("UPDATE products SET cost=? WHERE id=?", (float(v or 0), int(kk[1:])))
+                try:
+                    if kk[0] == "c" and kk[1:].isdigit(): k.execute("UPDATE products SET cost=? WHERE id=?", (max(0.0, float(v or 0)), int(kk[1:])))
+                    elif kk[0] == "p" and kk[1:].isdigit() and v != "": k.execute("UPDATE products SET price=? WHERE id=?", (max(0.0, float(v)), int(kk[1:])))
+                except ValueError: pass
             k.commit(); k.close(); return redirect("/pro/costs")
-        tr = "".join(f'<tr><td>{e(r["name"])}</td><td>{f(r["price"])}</td><td><input name="c{r["id"]}" type=number step=.001 min=0 value="{r["cost"] or 0}"></td></tr>' for r in rows("SELECT * FROM products ORDER BY name"))
-        return page("التكلفة والأرباح", f'<div class="panel"><p class="muted">أدخل سعر شراء كل منتج ليظهر الربح في لوحة التحكم.</p><form method=post><table><tr><th>المنتج</th><th>سعر البيع</th><th>التكلفة</th></tr>{tr}</table><p><button class="btn">حفظ</button></p></form></div>')
+        ps = rows("SELECT * FROM products ORDER BY name"); vc = sum((r["cost"] or 0) * max(r["stock"], 0) for r in ps); vs = sum(r["price"] * max(r["stock"], 0) for r in ps)
+        def line(r):
+            cst, pr = r["cost"] or 0, r["price"]; gain = pr - cst; mg = (gain / pr * 100) if pr else 0
+            st = '<b class="bad">⚠ تبيع بخسارة</b>' if (cst and gain < 0) else ('<span class="muted">أدخل سعر الشراء</span>' if not cst else f'<b class="ok">{mg:.0f}%</b>')
+            return (f'<tr><td>{e(r["name"])}</td><td><input name="c{r["id"]}" type=number step=.001 min=0 value="{cst}"></td>'
+                    f'<td><input name="p{r["id"]}" type=number step=.001 min=0 value="{pr}"></td><td>{f(gain) if cst else "—"}</td><td>{st}</td></tr>')
+        return page("أسعار الشراء والبيع", f'<div class="cards"><div><small>قيمة المخزون بسعر الشراء</small><b>{f(vc)}</b></div><div><small>قيمته بسعر البيع</small><b>{f(vs)}</b></div><div><small>الربح المتوقع</small><b>{f(vs - vc)}</b></div></div>'
+                    f'<div class="panel"><p class="muted">سعر الشراء = كم اشتريتَ القطعة. يُسجَّل مع كل بيع فتبقى أرباح الفواتير القديمة صحيحة حتى لو تغيّر السعر لاحقاً. للتوريدات الجديدة استخدم «🛍 تسجيل شراء».</p>'
+                    f'<form method=post><div class="tablewrap"><table><tr><th>المنتج</th><th>سعر الشراء</th><th>سعر البيع</th><th>الربح للقطعة</th><th>الهامش</th></tr>{"".join(line(r) for r in ps)}</table></div><p><button class="btn">حفظ</button></p></form></div>')
+
+    @app.route("/pro/purchase", methods=["GET", "POST"])
+    @login_required
+    def purchase():
+        need("costs"); msg = ""
+        if request.method == "POST":
+            try:
+                pid, q, uc = int(request.form["pid"]), int(request.form["qty"]), float(request.form["unit_cost"])
+                if q <= 0 or uc < 0: raise ValueError
+                k = db(); pr = k.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+                old = max(pr["stock"], 0); new_cost = round(((old * (pr["cost"] or 0)) + q * uc) / (old + q), 3)
+                k.execute("UPDATE products SET stock=stock+?,cost=? WHERE id=?", (q, new_cost, pid))
+                k.execute("INSERT INTO purchases(ts,product_id,name,qty,unit_cost,supplier,user) VALUES(?,?,?,?,?,?,?)", (NOW(), pid, pr["name"], q, uc, request.form.get("supplier", "").strip(), session.get("username")))
+                k.commit(); k.close()
+                msg = f'<div class="alert success">تم تسجيل الشراء. المخزون زاد {q} ومتوسط سعر الشراء الجديد {f(new_cost)}.</div>'
+            except Exception: msg = '<div class="alert danger">تحقق من البيانات (الكمية أكبر من صفر والسعر رقم صحيح).</div>'
+        opts = "".join(f'<option value={r["id"]}>{e(r["name"])} (المخزون {r["stock"]})</option>' for r in rows("SELECT id,name,stock FROM products ORDER BY name"))
+        hist = "".join(f'<tr><td>{r["ts"]}</td><td>{e(r["name"])}</td><td>{r["qty"]}</td><td>{f(r["unit_cost"])}</td><td>{f(r["qty"] * r["unit_cost"])}</td><td>{e(r["supplier"] or "")}</td><td>{e(r["user"] or "")}</td></tr>' for r in rows("SELECT * FROM purchases ORDER BY id DESC LIMIT 25"))
+        month = one("SELECT SUM(qty*unit_cost) FROM purchases WHERE strftime('%Y-%m',ts)=strftime('%Y-%m','now','localtime')")
+        return page("تسجيل شراء", f'{msg}<div class="cards"><div><small>مشتريات هذا الشهر</small><b>{f(month)}</b></div></div><div class="panel"><h3>🛍 توريد جديد</h3><form class="form" method=post>'
+                    f'<select name=pid class="search">{opts}</select><input name=qty type=number min=1 placeholder="الكمية المشتراة" required><input name=unit_cost type=number step=.001 min=0 placeholder="سعر شراء القطعة" required>'
+                    f'<input name=supplier placeholder="المورّد (اختياري)"><button class="btn">تسجيل</button></form></div>'
+                    f'<div class="panel"><h3>آخر المشتريات</h3><div class="tablewrap"><table><tr><th>الوقت</th><th>المنتج</th><th>الكمية</th><th>سعر القطعة</th><th>الإجمالي</th><th>المورّد</th><th>بواسطة</th></tr>{hist or "<tr><td colspan=7>—</td></tr>"}</table></div></div>')
 
     # ---------- تصدير ----------
     def table(what):
@@ -189,6 +223,31 @@ def register(app, db, login_required, base_dir, currency, my_perms):
         if "all" not in my_perms(): abort(403)
         tr = "".join(f'<tr><td>{r["ts"]}</td><td>{e(r["user"] or "")}</td><td>{e(r["action"])}</td></tr>' for r in rows("SELECT * FROM activity ORDER BY id DESC LIMIT 300"))
         return page("سجل النشاط", f'<div class="panel"><div class="tablewrap"><table><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th></tr>{tr}</table></div></div>')
+
+    # ---------- ملخص المدير: من يبيع أكثر ----------
+    @app.get("/pro/summary")
+    @login_required
+    def pro_summary():
+        need("reports")
+        P = {"today": ("اليوم", "date(sale_date)=date('now','localtime')"), "week": ("هذا الأسبوع", "strftime('%Y-%W',sale_date)=strftime('%Y-%W','now','localtime')"),
+             "month": ("هذا الشهر", "strftime('%Y-%m',sale_date)=strftime('%Y-%m','now','localtime')"), "all": ("كل الوقت", "1=1")}
+        key = request.args.get("p") if request.args.get("p") in P else "today"; label, W = P[key]
+        tot = one(f"SELECT SUM(total) FROM sales WHERE {W}"); n = one(f"SELECT COUNT(*) FROM sales WHERE {W}")
+        cash = one(f"SELECT SUM(total) FROM sales WHERE pay_method!='transfer' AND {W}"); tr = one(f"SELECT SUM(total) FROM sales WHERE pay_method='transfer' AND {W}")
+        disc = one(f"SELECT SUM(discount) FROM sales WHERE {W}")
+        prof = {r["u"]: r["pr"] or 0 for r in rows(f"SELECT COALESCE(s.user,'غير معروف') u,SUM(si.subtotal-si.quantity*COALESCE(si.cost,p.cost,0)) pr FROM sale_items si JOIN sales s ON s.id=si.sale_id LEFT JOIN products p ON p.id=si.product_id WHERE {W.replace('sale_date','s.sale_date')} GROUP BY u")}
+        us = rows(f"SELECT COALESCE(user,'غير معروف') u,COUNT(*) n,SUM(total) t,SUM(discount) d FROM sales WHERE {W} GROUP BY u ORDER BY t DESC")
+        mx = max([r["t"] or 0 for r in us] + [1]); medals = ["🥇", "🥈", "🥉"]
+        ut = "".join(f'<tr><td>{medals[i] if i < 3 else i + 1}</td><td><b>{e(r["u"])}</b></td><td>{r["n"]}</td><td>{f(r["t"])}</td><td>{f((r["t"] or 0) / r["n"])}</td>'
+                     f'<td>{f(prof.get(r["u"], 0) - (r["d"] or 0))}</td><td style="min-width:120px"><div style="background:#eee;border-radius:8px"><div style="height:10px;border-radius:8px;background:#2E7D5B;width:{int((r["t"] or 0) / mx * 100)}%"></div></div></td></tr>' for i, r in enumerate(us))
+        pt = "".join(f'<tr><td>{e(r["product_name"])}</td><td>{r["q"]}</td><td>{f(r["a"])}</td></tr>' for r in rows(
+            f"SELECT si.product_name,SUM(si.quantity) q,SUM(si.subtotal) a FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE {W.replace('sale_date','s.sale_date')} GROUP BY si.product_id ORDER BY q DESC LIMIT 8"))
+        tabs = "".join(f'<a class="mini" style="{"background:#2E7D5B;color:#fff" if k == key else ""}" href="/pro/summary?p={k}">{v[0]}</a> ' for k, v in P.items())
+        return page("ملخص المدير", f'<div class="panel">{tabs}</div><div class="cards"><div><small>المبيعات {label}</small><b>{f(tot)}</b></div><div><small>عدد الفواتير</small><b>{n}</b></div>'
+                    f'<div><small>كاش</small><b>{f(cash)}</b></div><div><small>تحويلات</small><b>{f(tr)}</b></div><div><small>الخصومات</small><b>{f(disc)}</b></div></div>'
+                    f'<div class="panel"><h3>🏆 ترتيب المستخدمين حسب المبيعات ({label})</h3><div class="tablewrap"><table><tr><th>#</th><th>المستخدم</th><th>الفواتير</th><th>المبيعات</th><th>متوسط الفاتورة</th><th>الربح*</th><th></th></tr>'
+                    f'{ut or "<tr><td colspan=7>لا توجد مبيعات</td></tr>"}</table></div><p class="muted">*الربح يحتاج إدخال تكلفة المنتجات. المبيعات القديمة قبل هذا التحديث تظهر باسم «غير معروف».</p></div>'
+                    f'<div class="panel"><h3>الأكثر مبيعاً ({label})</h3><div class="tablewrap"><table><tr><th>المنتج</th><th>الكمية</th><th>القيمة</th></tr>{pt or "<tr><td colspan=3>—</td></tr>"}</table></div></div>')
 
     # ---------- نسخ احتياطي يومي تلقائي ----------
     def backup_loop():
